@@ -1551,7 +1551,7 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
             float fps;
 
             frame_number = ost->frame_number;
-            fps = t > 1 ? frame_number / t : 0;
+            fps = t > 0 ? frame_number / t : 0;
             snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "frame=%5d fps=%3.*f q=%3.1f ",
                      frame_number, fps < 9.95, fps, q);
             av_bprintf(&buf_script, "frame=%d\n", frame_number);
