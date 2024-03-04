@@ -28,7 +28,7 @@
 typedef struct {
     int platform_idx;
     int device_idx;
-    char device_name[64];
+    char device_name[256];
     int64_t runtime;
 } OpenCLDeviceBenchmark;
 
@@ -241,8 +241,10 @@ int opt_opencl_bench(void *optctx, const char *opt, const char *arg)
                 devices[count].platform_idx = i;
                 devices[count].device_idx = j;
                 devices[count].runtime = score;
-                av_strlcpy(devices[count].device_name, device_node->device_name,
+                av_strlcpy(devices[count].device_name, "",
                            sizeof(devices[count].device_name));
+                av_strlcatf(devices[count].device_name, sizeof(devices[count].device_name),
+                           "[%s] %s", device_node->vendor_name, device_node->device_name);
                 count++;
             }
         }

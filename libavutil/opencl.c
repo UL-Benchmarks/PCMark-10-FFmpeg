@@ -41,6 +41,8 @@ static pthread_mutex_t * volatile atomic_opencl_lock = NULL;
 
 #define MAX_KERNEL_CODE_NUM 200
 
+#define CL_DEVICE_BOARD_NAME_AMD 0x4038
+
 typedef struct {
     int is_compiled;
     const char *kernel_string;
@@ -176,6 +178,8 @@ static void free_device_list(AVOpenCLDeviceList *device_list)
             continue;
         for (j = 0; j < device_list->platform_node[i]->device_num; j++) {
             av_freep(&(device_list->platform_node[i]->device_node[j]->device_name));
+            av_freep(&(device_list->platform_node[i]->device_node[j]->device_amd_name));
+            av_freep(&(device_list->platform_node[i]->device_node[j]->vendor_name));
             av_freep(&(device_list->platform_node[i]->device_node[j]));
         }
         av_freep(&device_list->platform_node[i]->device_node);
@@ -196,6 +200,8 @@ static int get_device_list(AVOpenCLDeviceList *device_list)
     AVOpenCLDeviceNode *device_node = NULL;
     size_t platform_name_size = 0;
     size_t device_name_size = 0;
+    size_t device_amd_name_size = 0;
+    size_t vendor_name_size = 0;
     status = clGetPlatformIDs(0, NULL, &device_list->platform_num);
     if (status != CL_SUCCESS) {
         av_log(&opencl_ctx, AV_LOG_ERROR,
@@ -285,6 +291,7 @@ static int get_device_list(AVOpenCLDeviceList *device_list)
                     device_node = device_list->platform_node[i]->device_node[device_num];
                     device_node->device_id = device_ids[k];
                     device_node->device_type = device_type[j];
+                    //get device name
                     status = clGetDeviceInfo(device_node->device_id, CL_DEVICE_NAME,
                                              0, NULL, &device_name_size);
                     if (status != CL_SUCCESS) {
@@ -306,6 +313,51 @@ static int get_device_list(AVOpenCLDeviceList *device_list)
                                 "Could not get device name: %s\n", av_opencl_errstr(status));
                         continue;
                     }
+                    //get AMD specific device name
+                    device_node->device_amd_name = 0;
+                    status = clGetDeviceInfo(device_node->device_id, CL_DEVICE_BOARD_NAME_AMD,
+                                             0, NULL, &device_amd_name_size);
+                    if (status != CL_SUCCESS) {
+                        //av_log(&opencl_ctx, AV_LOG_WARNING,
+                        //        "Could not get size of device AMD name: %s\n", av_opencl_errstr(status));
+                    } else {
+                        device_node->device_amd_name = av_malloc(device_amd_name_size * sizeof(char));
+                        if (!device_node->device_amd_name) {
+                            av_log(&opencl_ctx, AV_LOG_WARNING,
+                                "Could not allocate memory for device AMD name: %s\n", av_opencl_errstr(status));
+                        } else {
+                            status = clGetDeviceInfo(device_node->device_id, CL_DEVICE_BOARD_NAME_AMD,
+                                             device_amd_name_size * sizeof(char),
+                                             device_node->device_amd_name, NULL);
+                            if (status != CL_SUCCESS) {
+                                av_log(&opencl_ctx, AV_LOG_WARNING,
+                                    "Could not get device AMD name: %s\n", av_opencl_errstr(status));
+                            }
+                        }
+                    }
+                    //get vendor name
+                    status = clGetDeviceInfo(device_node->device_id, CL_DEVICE_VENDOR,
+                                             0, NULL, &vendor_name_size);
+                    if (status != CL_SUCCESS) {
+                        av_log(&opencl_ctx, AV_LOG_WARNING,
+                                "Could not get size of vendor name: %s\n", av_opencl_errstr(status));
+                        continue;
+                    }
+                    device_node->vendor_name = av_malloc(vendor_name_size * sizeof(char));
+                    if (!device_node->vendor_name) {
+                        av_log(&opencl_ctx, AV_LOG_WARNING,
+                                "Could not allocate memory for vendor name: %s\n", av_opencl_errstr(status));
+                        continue;
+                    }
+                    status = clGetDeviceInfo(device_node->device_id, CL_DEVICE_VENDOR,
+                                             vendor_name_size * sizeof(char),
+                                             device_node->vendor_name, NULL);
+                    if (status != CL_SUCCESS) {
+                        av_log(&opencl_ctx, AV_LOG_WARNING,
+                                "Could not get vendor name: %s\n", av_opencl_errstr(status));
+                        continue;
+                    }
+
                     device_list->platform_node[i]->device_num++;
                 }
                 av_freep(&device_ids);
@@ -589,9 +641,10 @@ static int init_opencl_env(OpenclContext *opencl_ctx, AVOpenCLExternalEnv *ext_o
             /*
              * Use available platform.
              */
-            av_log(opencl_ctx, AV_LOG_VERBOSE, "Platform Name: %s, Device Name: %s\n",
+            av_log(opencl_ctx, AV_LOG_VERBOSE, "Platform Name: %s, Device Name: %s, Vendor Name: %s, Device AMD Name: %s\n",
                    opencl_ctx->device_list.platform_node[opencl_ctx->platform_idx]->platform_name,
-                   device_node->device_name);
+                   device_node->device_name, device_node->vendor_name, 
+                   device_node->device_amd_name ? device_node->device_amd_name : "");
             cps[0] = CL_CONTEXT_PLATFORM;
             cps[1] = (cl_context_properties)opencl_ctx->platform_id;
             cps[2] = 0;
@@ -843,8 +896,9 @@ int64_t av_opencl_benchmark(AVOpenCLDeviceNode *device_node, cl_platform_id plat
     ext_opencl_env = av_opencl_alloc_external_env();
     ext_opencl_env->device_id = device_node->device_id;
     ext_opencl_env->device_type = device_node->device_type;
-    av_log(&opencl_ctx, AV_LOG_VERBOSE, "Performing test on OpenCL device %s\n",
-           device_node->device_name);
+    av_log(&opencl_ctx, AV_LOG_VERBOSE, "Performing test on OpenCL device [%s] %s (%s)\n",
+           device_node->vendor_name, device_node->device_name,
+		   (device_node->device_amd_name != NULL ? device_node->device_amd_name : ""));
 
     cps[0] = CL_CONTEXT_PLATFORM;
     cps[1] = (cl_context_properties)platform;

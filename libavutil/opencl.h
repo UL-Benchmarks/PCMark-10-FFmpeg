@@ -48,6 +48,8 @@
 typedef struct {
     int device_type;
     char *device_name;
+    char *device_amd_name;
+    char *vendor_name;
     cl_device_id device_id;
 } AVOpenCLDeviceNode;
 
